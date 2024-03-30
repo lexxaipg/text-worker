@@ -11,9 +11,8 @@ import textwrap
 import threading
 import time
 from collections import deque
-from math import trunc
+from math import trunc, floor
 
-import pkg_resources
 import psutil
 import requests
 
@@ -150,12 +149,6 @@ class TerminalUI:
         self.download_label = ""
         self.download_current = None
         self.download_total = None
-        if not self.scribe_worker:
-            from hordelib.settings import UserSettings
-            from hordelib.shared_model_manager import SharedModelManager
-
-            self.model_manager = SharedModelManager
-            UserSettings.download_progress_callback = self.download_progress
 
     def initialise(self):
         # Suppress stdout / stderr
@@ -375,10 +368,22 @@ class TerminalUI:
         # ║   (m)aintenance  (s)ource  (d)ebug  (p)ause log  (a)lerts  (r)eset  (q)uit  ║
         # ╙─────────────────────────────────────────────────────────────────────────────╜
 
+        # Add some warning colours to free ram
+        ram = self.get_free_ram()
+        ram_colour = curses.color_pair(TerminalUI.COLOUR_WHITE)
+        if re.match(r"\d{3,4} MB", ram):
+            ram_colour = curses.color_pair(TerminalUI.COLOUR_MAGENTA)
+        elif re.match(r"(\d{1,2}) MB", ram):
+            if self.audio_alerts and time.time() - self.last_audio_alert > TerminalUI.ALERT_INTERVAL:
+                self.last_audio_alert = time.time()
+                curses.beep()
+            ram_colour = curses.color_pair(TerminalUI.COLOUR_RED)
+
         # Define three colums centres
         col_left = 12
         col_mid = self.width // 2
         col_right = self.width - 12
+        cols = [col_left, col_mid, col_right]
 
         # How many GPUs are we using?
         num_gpus = self.gpu.get_num_gpus()
@@ -396,73 +401,68 @@ class TerminalUI:
         self.draw_box(0, 0, self.width, self.status_height)
         self.draw_line(self.main, row_gpu, "")
         self.draw_line(self.main, row_total, "Worker Total")
-        self.draw_line(self.main, row_horde, "Entire Horde")
+        self.draw_line(self.main, row_horde, "The Grid")
         self.print(self.main, row_local, 2, f"{self.worker_name}")
         self.print(self.main, row_local, self.width - 8, f"{self.commit_hash[:6]}")
-        self.print(self.main, row_local, self.width - 19, f"({self.get_hordelib_version()})")
 
-        label(row_local + 1, col_left, "Uptime:")
-        label(row_local + 2, col_left, "Models:")
-        label(row_local + 3, col_left, "Threads:")
-        label(row_local + 4, col_left, "CPU Load:")
-        label(row_local + 1, col_mid, "Jobs Completed:")
-        label(row_local + 2, col_mid, "Kudos Per Hour:")
-        label(row_local + 3, col_mid, "Warnings:")
-        label(row_local + 4, col_mid, "Free RAM:")
-        label(row_local + 1, col_right, "Avg Kudos Per Job:")
-        label(row_local + 2, col_right, "Jobs Per Hour:")
-        label(row_local + 3, col_right, "Errors:")
-        label(row_local + 4, col_right, "Job Fetch:")
+        fields = [
+            {'label': 'Uptime:', 'value': self.get_uptime, 'row': row_local + 1, 'col': col_left},
+            {'label': 'Models:', 'value': self.total_models, 'row': row_local + 2, 'col': col_left},
+            {'label': 'Threads:', 'value': self.threads, 'row': row_local + 3, 'col': col_left},
+            {'label': 'CPU Load:', 'value': self.get_cpu_usage(), 'row': row_local + 4, 'col': col_left},
+            {'label': 'Jobs Completed:', 'value': self.jobs_done, 'row': row_local + 1, 'col': col_mid},
+            {'label': 'Warnings:', 'value': self.warning_count, 'row': row_local + 3, 'col': col_mid},
+            {'label': 'Free RAM:', 'value': self.get_free_ram(), 'row': row_local + 4, 'col': col_mid},
+            {'label': 'Jobs Per Hour:', 'value': self.jobs_per_hour, 'row': row_local + 2, 'col': col_right},
+            {'label': 'Errors:', 'value': self.error_count, 'row': row_local + 3, 'col': col_right},
+            {'label': 'Job Fetch:', 'value': f"{self.pop_time} s", 'row': row_local + 4, 'col': col_right}
+        ]
+
+        for i,field in enumerate(fields):
+            col = cols[floor(i/4)]
+            row = row_local + (i % 4) + 1
+            label(row, col, field['label'])
+            if field['value'] is not None:
+                value = field['value']() if callable(field['value']) else field['value']
+                self.print(self.main, row, col, f"{value}")
+
+        gpu_fields = [
+            {'label': 'Load:', 'value': None, 'row_offset': 1, 'col': col_left},
+            {'label': 'Temp:', 'value': None, 'row_offset': 2, 'col': col_left},
+            {'label': 'Power:', 'value': None, 'row_offset': 3, 'col': col_left},
+            {'label': 'VRAM Total:', 'value': None, 'row_offset': 1, 'col': col_mid},
+            {'label': 'VRAM Used:', 'value': None, 'row_offset': 2, 'col': col_mid},
+            {'label': 'VRAM Free:', 'value': None, 'row_offset': 3, 'col': col_mid},
+            {'label': 'Fan Speed:', 'value': None, 'row_offset': 1, 'col': col_right},
+            {'label': 'PCI Gen:', 'value': None, 'row_offset': 2, 'col': col_right},
+            {'label': 'PCI Width:', 'value': None, 'row_offset': 3, 'col': col_right}
+        ]
 
         tmp_row_gpu = row_gpu
         for gpu_i in range(num_gpus):
-            label(tmp_row_gpu + 1, col_left, "Load:")
-            label(tmp_row_gpu + 2, col_left, "Temp:")
-            label(tmp_row_gpu + 3, col_left, "Power:")
-            label(tmp_row_gpu + 1, col_mid, "VRAM Total:")
-            label(tmp_row_gpu + 2, col_mid, "VRAM Used:")
-            label(tmp_row_gpu + 3, col_mid, "VRAM Free:")
-            label(tmp_row_gpu + 1, col_right, "Fan Speed:")
-            label(tmp_row_gpu + 2, col_right, "PCI Gen:")
-            label(tmp_row_gpu + 3, col_right, "PCI Width:")
+            for field in gpu_fields:
+                label(tmp_row_gpu + field['row_offset'], field['col'], field['label'])
             tmp_row_gpu += 4
 
-        label(row_total + 1, col_mid, "Worker Kudos:")
-        label(row_total + 2, col_mid, "Total Uptime:")
-        label(row_total + 1, col_right, "Total Jobs:")
-        label(row_total + 2, col_right, "Jobs Failed:")
+        total_fields = [
+            {'label': 'Jobs Done:', 'value': None, 'row': row_total + 1, 'col': col_left},
+            {'label': 'Total Uptime:', 'value': None, 'row': row_total + 1, 'col': col_mid},
+            {'label': 'Jobs Failed:', 'value': None, 'row': row_total + 1, 'col': col_right}
+        ]
 
-        label(row_horde + 1, col_mid, "Jobs Queued:")
-        label(row_horde + 2, col_mid, "Total Workers:")
-        label(row_horde + 1, col_right, "Queue Time:")
-        label(row_horde + 2, col_right, "Total Threads:")
+        for field in total_fields:
+            label(field['row'], field['col'], field['label'])
 
-        self.print(self.main, row_local + 1, col_left, f"{self.get_uptime()}")
-        self.print(self.main, row_local + 1, col_mid, f"{self.jobs_done}")
-        self.print(self.main, row_local + 1, col_right, f"{self.avg_kudos_per_job}")
+        horde_fields = [
+            {'label': 'Jobs Queued:', 'value': None, 'row': row_horde + 1, 'col': col_mid},
+            {'label': 'Total Workers:', 'value': None, 'row': row_horde + 2, 'col': col_mid},
+            {'label': 'Queue Time:', 'value': None, 'row': row_horde + 1, 'col': col_right},
+            {'label': 'Total Threads:', 'value': None, 'row': row_horde + 2, 'col': col_right}
+        ]
 
-        self.print(self.main, row_local + 2, col_left, f"{self.total_models}")
-        self.print(self.main, row_local + 2, col_mid, f"{self.kudos_per_hour}")
-        self.print(self.main, row_local + 2, col_right, f"{self.jobs_per_hour}")
+        for field in horde_fields:
+            label(field['row'], field['col'], field['label'])
 
-        self.print(self.main, row_local + 3, col_left, f"{self.threads}")
-        self.print(self.main, row_local + 3, col_mid, f"{self.warning_count}")
-        self.print(self.main, row_local + 3, col_right, f"{self.error_count}")
-        self.print(self.main, row_local + 4, col_right, f"{self.pop_time} s")
-
-        # Add some warning colours to free ram
-        ram = self.get_free_ram()
-        ram_colour = curses.color_pair(TerminalUI.COLOUR_WHITE)
-        if re.match(r"\d{3,4} MB", ram):
-            ram_colour = curses.color_pair(TerminalUI.COLOUR_MAGENTA)
-        elif re.match(r"(\d{1,2}) MB", ram):
-            if self.audio_alerts and time.time() - self.last_audio_alert > TerminalUI.ALERT_INTERVAL:
-                self.last_audio_alert = time.time()
-                curses.beep()
-            ram_colour = curses.color_pair(TerminalUI.COLOUR_RED)
-
-        self.print(self.main, row_local + 4, col_left, f"{self.get_cpu_usage()}")
-        self.print(self.main, row_local + 4, col_mid, f"{self.get_free_ram()}", ram_colour)
 
         gpus = []
         for gpu_i in range(num_gpus):
@@ -498,11 +498,9 @@ class TerminalUI:
 
                 row_gpu += 4
 
-        self.print(self.main, row_total + 1, col_mid, f"{self.total_kudos}")
-        self.print(self.main, row_total + 1, col_right, f"{self.total_jobs}")
-
-        self.print(self.main, row_total + 2, col_mid, f"{self.seconds_to_timestring(self.total_uptime)}")
-        self.print(self.main, row_total + 2, col_right, f"{self.total_failed_jobs}")
+        self.print(self.main, row_total + 1, col_left, f"{self.total_jobs}")
+        self.print(self.main, row_total + 1, col_mid, f"{self.seconds_to_timestring(self.total_uptime)}")
+        self.print(self.main, row_total + 1, col_right, f"{self.total_failed_jobs}")
 
         self.print(self.main, row_horde + 1, col_mid, f"{self.queued_requests}")
         self.print(self.main, row_horde + 1, col_right, f"{self.seconds_to_timestring(self.queue_time)}")
@@ -840,11 +838,6 @@ class TerminalUI:
         curses.echo()
         curses.endwin()
 
-    def get_hordelib_version(self):
-        try:
-            return pkg_resources.get_distribution("hordelib").version
-        except pkg_resources.DistributionNotFound:
-            return "Unknown"
 
 
 if __name__ == "__main__":
