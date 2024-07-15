@@ -4,13 +4,46 @@
 
 <PageTitle>Home</PageTitle>
 
-<button class="btn btn-primary" @onclick="StartGridTextWorker">Start Grid Text Worker</button>
+<label for="GridApiKey">Grid Api Key:</label><br/>
+<input type="text" id="GridApiKey" @bind="@GridApiKey" /><br/>
+If you don't have Grid API Key hey one from <a href="https://api.aipowergrid.io/register">https://api.aipowergrid.io/register</a><br/>
+<br/>
+<label for="ScribeName">Worker name (publicly visible):</label><br/>
+<input type="text" id="ScribeName" @bind="@WorkerName" /><br/>
+<br/>
+<label for="ModelName">Model Name:</label><br/>
+<input type="text" id="ModelName" @bind="@ModelName" /><br/>
+<br/>
+<label for="HuggingFaceToken">Hugging Face Token:</label><br/>
+<input type="text" id="HuggingFaceToken" @bind="@HuggingFaceToken" /><br/>
+<br/>
+<label for="WalletAddress">AIPG Coin Wallet Address:</label><br/>
+<input type="text" id="WalletAddress" @bind="@WalletAddress" /><br/>
+Not sure where to get one? Click <a href="https://aipowergrid.io/wallet">here</a><br/>
+Current AIPG Coin price: <a href="https://a.com"></a> $0.02719<br/>
+<br/>
+Looking for CUDA on host... Not Found! Click <a href="https://www.nvidia.com/Download/index.aspx">here</a> to download CUDA.<br/>
+<br/>
+Online for: 16:22:11<br/>
+Text tokens generated: 1534235<br/>
+Image megapixels generated: 35412<br/>
+AIPG Earned: 65,200.21545<br/>
+<br/>
+// IMAGINE SOME CHARTS HERE<br/>
+
+<button class="btn btn-primary" @onclick="StartGridTextWorker">Save and restart worker</button>
 
 <p role="status">@WorkerOutputAsString</p>
 
 @code {
     private string? WorkerOutputAsString { get; set; }
 
+    private string? GridApiKey { get; set; }
+    private string? WorkerName { get; set; }
+    private string? ModelName { get; set; } = "meta-llama/Meta-Llama-3-8B-Instruct";
+    private string? HuggingFaceToken { get; set; }
+    private string? WalletAddress { get; set; }
+    
     protected override Task OnInitializedAsync()
     {
         OmniControllerMain.Instance.OnGridTextWorkerOutputChangedEvent += OnGridTextWorkerOutputChanged;
@@ -29,7 +62,7 @@
 
     private string GetWorkerOutputAsString()
     {
-        return string.Join("</br>", GetWorkerOutput());
+        return string.Join("<br/>", GetWorkerOutput());
     }
 
     private void OnGridTextWorkerOutputChanged(object? sender, EventArgs e)
