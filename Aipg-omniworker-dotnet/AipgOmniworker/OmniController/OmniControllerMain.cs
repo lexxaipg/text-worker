@@ -10,7 +10,7 @@ public class OmniControllerMain
 
     public event EventHandler OnGridTextWorkerOutputChangedEvent;
 
-    public string WorkingDirectory => "worker";
+    public string WorkingDirectory => "/worker";
     
     public async Task Initialize()
     {
@@ -37,12 +37,11 @@ public class OmniControllerMain
         
         Process? process = Process.Start(new ProcessStartInfo
         {
-            FileName = "python",
+            FileName = "/usr/bin/python3",
             Arguments = "-s bridge_scribe.py",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true,
             WorkingDirectory = WorkingDirectory
         });
         
