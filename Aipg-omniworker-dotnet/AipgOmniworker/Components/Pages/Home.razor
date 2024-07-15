@@ -1,7 +1,44 @@
 ﻿@page "/"
+@using AipgOmniworker.OmniController
+@rendermode InteractiveServer
 
 <PageTitle>Home</PageTitle>
 
-<h1>Hello, world!</h1>
+<button class="btn btn-primary" @onclick="StartGridTextWorker">Start Grid Text Worker</button>
 
-Welcome to your new app.
+<p role="status">@WorkerOutputAsString</p>
+
+@code {
+    private string? WorkerOutputAsString { get; set; }
+
+    protected override Task OnInitializedAsync()
+    {
+        OmniControllerMain.Instance.OnGridTextWorkerOutputChangedEvent += OnGridTextWorkerOutputChanged;
+        return Task.CompletedTask;
+    }
+
+    private async void StartGridTextWorker()
+    {
+        await OmniControllerMain.Instance.StartGridTextWorker();
+    }
+
+    private List<string> GetWorkerOutput()
+    {
+        return OmniControllerMain.Instance.GridTextWorkerOutput;
+    }
+
+    private string GetWorkerOutputAsString()
+    {
+        return string.Join('\n', GetWorkerOutput());
+    }
+
+    private void OnGridTextWorkerOutputChanged(object? sender, EventArgs e)
+    {
+        InvokeAsync(() =>
+        {
+            WorkerOutputAsString = GetWorkerOutputAsString();
+            StateHasChanged();
+        });
+    }
+
+}
