@@ -69,26 +69,3 @@ RUN aspnetcore_version=8.0.7 \
     && rm aspnetcore.tar.gz
 	
 ENV ASPNET_VERSION=8.0.7
-
-#USER $APP_UID
-WORKDIR /app
-EXPOSE 8080
-EXPOSE 8081
-
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-ARG BUILD_CONFIGURATION=Release
-WORKDIR /src
-COPY ["Aipg-omniworker-dotnet/AipgOmniworker/AipgOmniworker.csproj", "AipgOmniworker/"]
-RUN dotnet restore "AipgOmniworker/AipgOmniworker.csproj"
-COPY Aipg-omniworker-dotnet/ .
-WORKDIR "/src/AipgOmniworker"
-RUN dotnet build "AipgOmniworker.csproj" -c $BUILD_CONFIGURATION -o /app/build
-
-FROM build AS publish
-ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "AipgOmniworker.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
-
-FROM base AS final
-WORKDIR /app
-COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "AipgOmniworker.dll"]
