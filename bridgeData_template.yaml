@@ -22,7 +22,7 @@ scribe_name: "An Awesome Scribe"
 # The KoboldAI Client API URL 
 # By default, this should be http://<container_name>:7860, in our template is set to: http://aphrodite-engine:7860. 
 # Attention: the 'container_name' field refers to the name of the Aphrodite container.
-kai_url: "http://aphrodite-engine:7860"
+kai_url: "http://localhost:7860"
 # The max amount of tokens to generate with this worker 
 max_length: 512
 # The max tokens to use from the prompt
