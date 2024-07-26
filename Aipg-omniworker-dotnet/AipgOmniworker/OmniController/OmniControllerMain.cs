@@ -1,16 +1,18 @@
 ﻿using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace AipgOmniworker.OmniController;
 
 public class OmniControllerMain
 {
-    public static OmniControllerMain Instance { get; private set; } = new();
-
     public List<string> GridTextWorkerOutput { get; private set; } = new();
 
-    public event EventHandler OnGridTextWorkerOutputChangedEvent;
+    public event EventHandler<string> OnGridTextWorkerOutputChangedEvent;
 
     public string WorkingDirectory => "/worker";
+    
+    private Process? _gridTextWorkerProcess;
+    
     
     public async Task Initialize()
     {
@@ -37,12 +39,14 @@ public class OmniControllerMain
         
         Process? process = Process.Start(new ProcessStartInfo
         {
-            FileName = "/usr/bin/python3",
-            Arguments = "-s bridge_scribe.py",
+            //FileName = "/usr/bin/python3",
+            //Arguments = "-s bridge_scribe.py",
+            FileName = "/worker/run-worker.sh",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            UseShellExecute = false,
-            WorkingDirectory = WorkingDirectory
+            //UseShellExecute = false,
+            WorkingDirectory = WorkingDirectory,
+            Environment = { { "TERM", "xterm" } }
         });
         
         if (process == null)
@@ -50,6 +54,8 @@ public class OmniControllerMain
             PrintGridTextWorkerOutput("Failed to start GridTextWorker");
             return;
         }
+
+        _gridTextWorkerProcess = process;
         
         process.Exited += (sender, args) =>
         {
@@ -78,15 +84,41 @@ public class OmniControllerMain
     
     private void PrintGridTextWorkerOutput(string output)
     {
+        output =  new Regex(@"\x1B\[[^@-~]*[@-~]").Replace(output, "");
         GridTextWorkerOutput.Add(output);
 
         try
         {
-            OnGridTextWorkerOutputChangedEvent?.Invoke(this, EventArgs.Empty);
+            OnGridTextWorkerOutputChangedEvent?.Invoke(this, output);
         }
         catch (Exception e)
         {
             Console.WriteLine(e);
         }
+    }
+
+    public async Task KillWorkers()
+    {
+        if(_gridTextWorkerProcess != null && !_gridTextWorkerProcess.HasExited)
+        {
+            _gridTextWorkerProcess.Kill();
+        }
+
+        await WaitForExit().WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private async Task WaitForExit()
+    {
+        while(_gridTextWorkerProcess != null && !_gridTextWorkerProcess.HasExited)
+        {
+            await Task.Delay(100);
+        }
+
+        _gridTextWorkerProcess = null;
+    }
+
+    public void ClearOutput()
+    {
+        GridTextWorkerOutput.Clear();
     }
 }

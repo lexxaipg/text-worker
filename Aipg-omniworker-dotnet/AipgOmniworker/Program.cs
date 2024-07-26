@@ -1,6 +1,11 @@
 using AipgOmniworker.Components;
+using AipgOmniworker.OmniController;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddSingleton<BridgeConfigManager>();
+builder.Services.AddSingleton<OmniControllerMain>();
+builder.Services.AddSingleton<TextWorkerConfigManager>();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
