@@ -1,124 +1,155 @@
-﻿using System.Diagnostics;
-using System.Text.RegularExpressions;
-
-namespace AipgOmniworker.OmniController;
+﻿namespace AipgOmniworker.OmniController;
 
 public class OmniControllerMain
 {
-    public List<string> GridTextWorkerOutput { get; private set; } = new();
+    public List<string> Output { get; } = new();
+    public List<string> TextWorkerOutput { get; } = new();
 
-    public event EventHandler<string> OnGridTextWorkerOutputChangedEvent;
+    public bool Status { get; private set; }
 
-    public string WorkingDirectory => "/worker";
-    
-    private Process? _gridTextWorkerProcess;
-    
-    
-    public async Task Initialize()
+    public event EventHandler? StateChangedEvent;
+
+    private CancellationTokenSource _startCancellation;
+    private readonly GridWorkerController _gridWorkerController;
+    private readonly BridgeConfigManager _bridgeConfigManager;
+    private readonly TextWorkerConfigManager _textWorkerConfigManager;
+
+    public OmniControllerMain(GridWorkerController gridWorkerController, BridgeConfigManager bridgeConfigManager,
+        TextWorkerConfigManager textWorkerConfigManager)
     {
+        _gridWorkerController = gridWorkerController;
+        _bridgeConfigManager = bridgeConfigManager;
+        _textWorkerConfigManager = textWorkerConfigManager;
+        _gridWorkerController = gridWorkerController;
+
+        _gridWorkerController.OnGridTextWorkerOutputChangedEvent += OnGridTextWorkerOutputChanged;
     }
 
-    public async Task StartGridTextWorker()
+    private void OnGridTextWorkerOutputChanged(object? sender, string output)
+    {
+        TextWorkerOutput.Add(output);
+        StateChangedEvent?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task SaveAndRestart()
     {
         try
         {
-            await StartGridTextWorkerInternal();
+            Status = false;
+            await StartGridTextWorkerAsync();
+            Status = true;
         }
         catch (Exception e)
         {
-            PrintGridTextWorkerOutput($"Failed to start grid text worker");
-            PrintGridTextWorkerOutput(e.ToString());
+            AddOutput(e.ToString());
+            Status = false;
         }
     }
-    
-    private async Task StartGridTextWorkerInternal()
+
+    private async Task StartGridTextWorkerAsync()
     {
-        PrintGridTextWorkerOutput("Starting grid text worker...");
+        AddOutput("Stopping worker...");
+        _startCancellation?.Cancel();
 
-        await Task.Delay(200);
-        
-        Process? process = Process.Start(new ProcessStartInfo
-        {
-            //FileName = "/usr/bin/python3",
-            //Arguments = "-s bridge_scribe.py",
-            FileName = "/worker/run-worker.sh",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            //UseShellExecute = false,
-            WorkingDirectory = WorkingDirectory,
-            Environment = { { "DISABLE_TERMINAL_UI", "true" } }
-        });
-        
-        if (process == null)
-        {
-            PrintGridTextWorkerOutput("Failed to start GridTextWorker");
-            return;
-        }
+        await _gridWorkerController.KillWorkers();
 
-        _gridTextWorkerProcess = process;
-        
-        process.Exited += (sender, args) =>
-        {
-            PrintGridTextWorkerOutput($"Grid text worker exited! Exit code: {process.ExitCode}");
-        };
-        
-        process.OutputDataReceived += (sender, args) =>
-        {
-            if (args.Data != null)
-            {
-                PrintGridTextWorkerOutput(args.Data);
-            }
-        };
+        _gridWorkerController.ClearOutput();
+        Output.Clear();
 
-        process.ErrorDataReceived += (sender, args) =>
-        {
-            if (args.Data != null)
-            {
-                PrintGridTextWorkerOutput(args.Data);
-            }
-        };
-        
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        AddOutput("Starting worker...");
+
+        _startCancellation = new CancellationTokenSource();
+
+        await StartAphrodite();
+        await WaitForAphroditeStart();
+
+        AddOutput("Starting Grid Text Worker...");
+        await _gridWorkerController.StartGridTextWorker();
+        AddOutput("Grid Text Worker started!");
     }
-    
-    private void PrintGridTextWorkerOutput(string output)
-    {
-        output =  new Regex(@"\x1B\[[^@-~]*[@-~]").Replace(output, "");
-        GridTextWorkerOutput.Add(output);
 
+    private async Task WaitForAphroditeStart()
+    {
         try
         {
-            OnGridTextWorkerOutputChangedEvent?.Invoke(this, output);
+            AddOutput("Waiting for Aphrodite to start...");
+            await WaitForAphriditeToStart()
+                .WaitAsync(TimeSpan.FromMinutes(20), _startCancellation.Token);
+            AddOutput("Aphrodite started!");
+        }
+        catch (TimeoutException e)
+        {
+            AddOutput("Failed to start Aphrodite: timeout.");
+        }
+        catch (TaskCanceledException e)
+        {
+            AddOutput("Aphrodite start cancelled.");
         }
         catch (Exception e)
         {
-            Console.WriteLine(e);
+            AddOutput(e.ToString());
         }
     }
 
-    public async Task KillWorkers()
+    private List<string> GetWorkerOutput()
     {
-        if(_gridTextWorkerProcess != null && !_gridTextWorkerProcess.HasExited)
+        return _gridWorkerController.GridTextWorkerOutput;
+    }
+
+    private async Task StartAphrodite()
+    {
+        var textWorkerConfig = await _textWorkerConfigManager.LoadConfig();
+        string ModelName = textWorkerConfig.model_name;
+        string HuggingFaceToken = textWorkerConfig.hugging_face_token;
+
+        string command = $"(docker container stop aphrodite-engine || ver > nul)" +
+                         $"&& (docker rm aphrodite-engine || ver > nul)" +
+                         $"&& docker run -d -p 2242:7860 --network ai_network --gpus all --shm-size 8g" +
+                         $" -e MODEL_NAME={ModelName}" +
+                         $" -e KOBOLD_API=true" +
+                         $" -e GPU_MEMORY_UTILIZATION=0.9" +
+                         $" -e HF_TOKEN={HuggingFaceToken}" +
+                         $" --name aphrodite-engine alpindale/aphrodite-engine";
+
+        AddOutput("");
+        AddOutput("To continue, run the following command:");
+        AddOutput(command);
+        AddOutput("");
+    }
+
+    private async Task WaitForAphriditeToStart()
+    {
+        // Check if there is any response from get on port 7860
+        string address = "http://aphrodite-engine:7860";
+
+        while (!_startCancellation.IsCancellationRequested)
         {
-            _gridTextWorkerProcess.Kill();
-        }
+            try
+            {
+                using HttpClient client = new HttpClient();
+                HttpResponseMessage response = await client.GetAsync(address);
 
-        await WaitForExit().WaitAsync(TimeSpan.FromSeconds(10));
+                if (response.IsSuccessStatusCode)
+                {
+                    AddOutput("Aphrodite started successfully.");
+                    break;
+                }
+            }
+            catch (HttpRequestException e)
+            {
+            }
+            catch (Exception e)
+            {
+                AddOutput(e.ToString());
+            }
+
+            await Task.Delay(1000);
+        }
     }
 
-    private async Task WaitForExit()
+    private void AddOutput(string output)
     {
-        while(_gridTextWorkerProcess != null && !_gridTextWorkerProcess.HasExited)
-        {
-            await Task.Delay(100);
-        }
-
-        _gridTextWorkerProcess = null;
-    }
-
-    public void ClearOutput()
-    {
-        GridTextWorkerOutput.Clear();
+        Output.Add(output);
+        StateChangedEvent?.Invoke(this, EventArgs.Empty);
     }
 }

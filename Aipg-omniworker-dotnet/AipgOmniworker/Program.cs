@@ -4,8 +4,10 @@ using AipgOmniworker.OmniController;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<BridgeConfigManager>();
-builder.Services.AddSingleton<OmniControllerMain>();
+builder.Services.AddSingleton<GridWorkerController>();
 builder.Services.AddSingleton<TextWorkerConfigManager>();
+builder.Services.AddSingleton<AphroditeController>();
+builder.Services.AddSingleton<OmniControllerMain>();
 
 // Expose to any address on port 8080
 builder.WebHost.ConfigureKestrel(options =>

@@ -1,9 +1,10 @@
 ﻿@page "/"
 @using AipgOmniworker.OmniController
 @rendermode InteractiveServer
-@inject OmniControllerMain OmniControllerMain
+@inject GridWorkerController GridWorkerController
 @inject BridgeConfigManager BridgeConfigManager
 @inject TextWorkerConfigManager TextWorkerConfigManager
+@inject OmniControllerMain OmniControllerMain
 
 <PageTitle>Home</PageTitle>
 
@@ -25,7 +26,7 @@ If you don't have Grid API Key get one from <a href="https://api.aipowergrid.io/
 @* Not sure where to get one? Click <a href="https://aipowergrid.io/wallet">here</a><br/> *@
 
 @* Display status *@
-@if (Status)
+@if (OmniControllerMain.Status)
 {
     <div class="alert alert-success" role="alert">
         Worker is running
@@ -41,30 +42,23 @@ else
 <button class="btn btn-primary" @onclick="StartGridTextWorker">Save and restart worker</button>
 
 <!-- Disable worker output logs as scrollable readonly text box -->
-<textarea class="form-control" rows="20" readonly>@Output.ToOutputString()</textarea>
+<textarea class="form-control" rows="20" readonly>@OmniControllerMain.Output.ToOutputString()</textarea>
 
 <br/>
 Text worker process output:
-<textarea class="form-control" rows="20" readonly>@TextWorkerOutput.ToOutputString()</textarea>
+<textarea class="form-control" rows="20" readonly>@OmniControllerMain.TextWorkerOutput.ToOutputString()</textarea>
 
 @code {
-    private List<string> Output { get; set; } = new();
-    private List<string> TextWorkerOutput { get; set; } = new();
-
     private string? GridApiKey { get; set; }
     private string? WorkerName { get; set; }
     private string? ModelName { get; set; }
     private string? HuggingFaceToken { get; set; }
     private string? WalletAddress { get; set; }
-    private bool Status { get; set; }
-
-    private CancellationTokenSource _startCancellation;
     
     protected override async Task OnInitializedAsync()
     {
-        OmniControllerMain.OnGridTextWorkerOutputChangedEvent += OnGridTextWorkerOutputChanged;
-        TextWorkerOutput = GetWorkerOutput();
-
+        OmniControllerMain.StateChangedEvent += (_, _) => InvokeAsync(StateHasChanged);
+        
         try
         {
             var bridgeConfig = await BridgeConfigManager.LoadConfig();
@@ -73,7 +67,7 @@ Text worker process output:
         }
         catch (Exception e)
         {
-            Output.Add(e.ToString());
+            OmniControllerMain.Output.Add(e.ToString());
         }
 
         try
@@ -85,96 +79,17 @@ Text worker process output:
         }
         catch (Exception e)
         {
-            Output.Add(e.ToString());
+            OmniControllerMain.Output.Add(e.ToString());
         }
     }
 
-    private async void StartGridTextWorker()
+    private async Task StartGridTextWorker()
     {
-        try
-        {
-            Status = false;
-            await StartGridTextWorkerAsync();
-            Status = true;
-        }
-        catch (Exception e)
-        {
-            Output.Add(e.ToString());
-            Status = false;
-        }
-    }
-    
-    private async Task StartGridTextWorkerAsync()
-    {
-        Output.Add("Stopping worker...");
-        StateHasChanged();
-        _startCancellation?.Cancel();
-        
-        await OmniControllerMain.KillWorkers();
-        
-        OmniControllerMain.ClearOutput();
-        Output.Clear();
-        
-        Output.Add("Starting worker...");
-        StateHasChanged();
-        
-        _startCancellation = new CancellationTokenSource();
-        
-        Output.Add("Saving configs");
-        await ApplyBridgeConfig(); 
+        await ApplyBridgeConfig();
         await ApplyTextWorkerConfig();
-        
-        await StartAphrodite();
-        await WaitForAphroditeStart();
-        
-        Output.Add("Starting Grid Text Worker...");
-        await OmniControllerMain.StartGridTextWorker();
-        Output.Add("Grid Text Worker started!");
-        StateHasChanged();
-    }
-
-    private async Task WaitForAphroditeStart()
-    {
-        try
-        {
-            Output.Add("Waiting for Aphrodite to start...");
-            StateHasChanged();
-            await WaitForAphriditeToStart()
-                .WaitAsync(TimeSpan.FromMinutes(20), _startCancellation.Token);
-            Output.Add("Aphrodite started!");
-            StateHasChanged();
-        }
-        catch (TimeoutException e)
-        {
-            Output.Add("Failed to start Aphrodite: timeout.");
-            StateHasChanged();
-        }
-        catch (TaskCanceledException e)
-        {
-            Output.Add("Aphrodite start cancelled.");
-            StateHasChanged();
-        }
-        catch(Exception e)
-        {
-            Output.Add(e.ToString());
-            StateHasChanged();
-        }
-    }
-
-    private List<string> GetWorkerOutput()
-    {
-        return OmniControllerMain.GridTextWorkerOutput;
+        await OmniControllerMain.SaveAndRestart();
     }
     
-    private void OnGridTextWorkerOutputChanged(object? sender, string output)
-    {
-        InvokeAsync(() =>
-        {
-            TextWorkerOutput.Add(output);
-            StateHasChanged();
-        });
-    }
-
     private async Task ApplyBridgeConfig()
     {
         BridgeConfig config = await BridgeConfigManager.LoadConfig();
@@ -191,54 +106,4 @@ Text worker process output:
         await TextWorkerConfigManager.SaveConfig(config);
     }
 
-    private async Task StartAphrodite()
-    {
-        string command = $"(docker container stop aphrodite-engine || ver > nul)" +
-                         $"&& (docker rm aphrodite-engine || ver > nul)" +
-                         $"&& docker run -d -p 2242:7860 --network ai_network --gpus all --shm-size 8g" +
-                         $" -e MODEL_NAME={ModelName}" +
-                         $" -e KOBOLD_API=true" +
-                         $" -e GPU_MEMORY_UTILIZATION=0.9" +
-                         $" -e HF_TOKEN={HuggingFaceToken}" +
-                         $" --name aphrodite-engine alpindale/aphrodite-engine";
-        
-        Output.Add("");
-        Output.Add("To continue, run the following command:");
-        Output.Add(command);
-        Output.Add("");
-        
-        StateHasChanged();
-    }
-
-    private async Task WaitForAphriditeToStart()
-    {
-        // Check if there is any response from get on port 7860
-        string address = "http://aphrodite-engine:7860";
-
-        while (!_startCancellation.IsCancellationRequested)
-        {
-            try
-            {
-                using HttpClient client = new HttpClient();
-                HttpResponseMessage response = await client.GetAsync(address);
-                
-                if (response.IsSuccessStatusCode)
-                {
-                    Output.Add("Aphrodite started successfully.");
-                    StateHasChanged();
-                    break;
-                }
-            }
-            catch (HttpRequestException e)
-            {
-            }
-            catch (Exception e)
-            {
-                Output.Add(e.ToString());
-                StateHasChanged();
-            }
-            
-            await Task.Delay(1000);
-        }
-    }
 }
