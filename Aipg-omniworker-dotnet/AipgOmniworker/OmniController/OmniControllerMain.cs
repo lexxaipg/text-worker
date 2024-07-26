@@ -46,7 +46,7 @@ public class OmniControllerMain
             RedirectStandardError = true,
             //UseShellExecute = false,
             WorkingDirectory = WorkingDirectory,
-            Environment = { { "TERM", "xterm" } }
+            Environment = { { "DISABLE_TERMINAL_UI", "true" } }
         });
         
         if (process == null)

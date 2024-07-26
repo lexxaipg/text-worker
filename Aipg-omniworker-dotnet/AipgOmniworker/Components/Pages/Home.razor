@@ -41,11 +41,11 @@ else
 <button class="btn btn-primary" @onclick="StartGridTextWorker">Save and restart worker</button>
 
 <!-- Disable worker output logs as scrollable readonly text box -->
-<textarea class="form-control" rows="20" readonly>@Output.ToOutputString();</textarea>
+<textarea class="form-control" rows="20" readonly>@Output.ToOutputString()</textarea>
 
 <br/>
 Text worker process output:
-<textarea class="form-control" rows="20" readonly>@TextWorkerOutput.ToOutputString();</textarea>
+<textarea class="form-control" rows="20" readonly>@TextWorkerOutput.ToOutputString()</textarea>
 
 @code {
     private List<string> Output { get; set; } = new();
@@ -107,6 +107,7 @@ Text worker process output:
     private async Task StartGridTextWorkerAsync()
     {
         Output.Add("Stopping worker...");
+        StateHasChanged();
         _startCancellation?.Cancel();
         
         await OmniControllerMain.KillWorkers();
@@ -115,6 +116,7 @@ Text worker process output:
         Output.Clear();
         
         Output.Add("Starting worker...");
+        StateHasChanged();
         
         _startCancellation = new CancellationTokenSource();
         
@@ -128,6 +130,7 @@ Text worker process output:
         Output.Add("Starting Grid Text Worker...");
         await OmniControllerMain.StartGridTextWorker();
         Output.Add("Grid Text Worker started!");
+        StateHasChanged();
     }
 
     private async Task WaitForAphroditeStart()
@@ -135,21 +138,26 @@ Text worker process output:
         try
         {
             Output.Add("Waiting for Aphrodite to start...");
+            StateHasChanged();
             await WaitForAphriditeToStart()
                 .WaitAsync(TimeSpan.FromMinutes(20), _startCancellation.Token);
             Output.Add("Aphrodite started!");
+            StateHasChanged();
         }
         catch (TimeoutException e)
         {
             Output.Add("Failed to start Aphrodite: timeout.");
+            StateHasChanged();
         }
         catch (TaskCanceledException e)
         {
             Output.Add("Aphrodite start cancelled.");
+            StateHasChanged();
         }
         catch(Exception e)
         {
             Output.Add(e.ToString());
+            StateHasChanged();
         }
     }
 
@@ -185,7 +193,9 @@ Text worker process output:
 
     private async Task StartAphrodite()
     {
-        string command = $"docker run -d -p 2242:7860 --network ai_network --gpus all --shm-size 8g" +
+        string command = $"(docker container stop aphrodite-engine || ver > nul)" +
+                         $"&& (docker rm aphrodite-engine || ver > nul)" +
+                         $"&& docker run -d -p 2242:7860 --network ai_network --gpus all --shm-size 8g" +
                          $" -e MODEL_NAME={ModelName}" +
                          $" -e KOBOLD_API=true" +
                          $" -e GPU_MEMORY_UTILIZATION=0.9" +
@@ -225,6 +235,7 @@ Text worker process output:
             catch (Exception e)
             {
                 Output.Add(e.ToString());
+                StateHasChanged();
             }
             
             await Task.Delay(1000);
