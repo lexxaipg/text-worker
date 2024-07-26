@@ -3,7 +3,6 @@
 public class OmniControllerMain
 {
     public List<string> Output { get; } = new();
-    public List<string> TextWorkerOutput { get; } = new();
 
     public bool Status { get; private set; }
 
@@ -23,13 +22,19 @@ public class OmniControllerMain
         _textWorkerConfigManager = textWorkerConfigManager;
         _aphroditeController = aphroditeController;
         _gridWorkerController = gridWorkerController;
+        _aphroditeController = aphroditeController;
 
         _gridWorkerController.OnGridTextWorkerOutputChangedEvent += OnGridTextWorkerOutputChanged;
+        _aphroditeController.OnAphroditeOutputChangedEvent += OnAphroditeOutputChanged;
+    }
+
+    private void OnAphroditeOutputChanged(object? sender, string e)
+    {
+        StateChangedEvent?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnGridTextWorkerOutputChanged(object? sender, string output)
     {
-        TextWorkerOutput.Add(output);
         StateChangedEvent?.Invoke(this, EventArgs.Empty);
     }
 
@@ -64,8 +69,17 @@ public class OmniControllerMain
 
         _startCancellation = new CancellationTokenSource();
 
-        AddOutput("Starting Aphrodite...");
+        AddOutput("Starting Aphrodite and downloading model... (this may take a few minutes)");
         await _aphroditeController.StarAphrodite();
+
+        bool started = await _aphroditeController.WaitForAphriditeToStart(_startCancellation.Token);
+
+        if (!started)
+        {
+            AddOutput("Aphrodite failed to start !!!");
+            return;
+        }
+        
         AddOutput("Aphrodite started!");
 
         AddOutput("Starting Grid Text Worker...");

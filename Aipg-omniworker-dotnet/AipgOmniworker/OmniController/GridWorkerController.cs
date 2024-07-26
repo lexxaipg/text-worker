@@ -101,7 +101,7 @@ public class GridWorkerController
     {
         if(_gridTextWorkerProcess != null && !_gridTextWorkerProcess.HasExited)
         {
-            _gridTextWorkerProcess.Kill();
+            _gridTextWorkerProcess.Kill(true);
         }
 
         await WaitForExit().WaitAsync(TimeSpan.FromSeconds(10));

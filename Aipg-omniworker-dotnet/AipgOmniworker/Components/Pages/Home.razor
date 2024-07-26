@@ -5,6 +5,7 @@
 @inject BridgeConfigManager BridgeConfigManager
 @inject TextWorkerConfigManager TextWorkerConfigManager
 @inject OmniControllerMain OmniControllerMain
+@inject AphroditeController AphroditeController
 
 <PageTitle>Home</PageTitle>
 
@@ -46,7 +47,11 @@ else
 
 <br/>
 Text worker process output:
-<textarea class="form-control" rows="20" readonly>@OmniControllerMain.TextWorkerOutput.ToOutputString()</textarea>
+<textarea class="form-control" rows="20" readonly>@GridWorkerController.GridTextWorkerOutput.ToOutputString()</textarea>
+
+<br/>
+Aphrodite process output:
+<textarea class="form-control" rows="20" readonly>@AphroditeController.AphroditeOutput.ToOutputString()</textarea>
 
 @code {
     private string? GridApiKey { get; set; }
@@ -85,6 +90,24 @@ Text worker process output:
 
     private async Task StartGridTextWorker()
     {
+        if (string.IsNullOrWhiteSpace(ModelName))
+        {
+            OmniControllerMain.Output.Add("Model Name is required!");
+            return;
+        }
+        
+        if (string.IsNullOrWhiteSpace(GridApiKey))
+        {
+            OmniControllerMain.Output.Add("Grid API Key is required!");
+            return;
+        }
+        
+        if (string.IsNullOrWhiteSpace(WorkerName))
+        {
+            OmniControllerMain.Output.Add("Worker Name is required!");
+            return;
+        }
+        
         await ApplyBridgeConfig();
         await ApplyTextWorkerConfig();
         await OmniControllerMain.SaveAndRestart();
@@ -95,6 +118,7 @@ Text worker process output:
         BridgeConfig config = await BridgeConfigManager.LoadConfig();
         config.api_key = GridApiKey;
         config.worker_name = WorkerName;
+        config.scribe_name = WorkerName;
         await BridgeConfigManager.SaveConfig(config);
     }
 
