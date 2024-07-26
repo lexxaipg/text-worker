@@ -7,6 +7,12 @@ builder.Services.AddSingleton<BridgeConfigManager>();
 builder.Services.AddSingleton<OmniControllerMain>();
 builder.Services.AddSingleton<TextWorkerConfigManager>();
 
+// Expose to any address on port 8080
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(8080);
+});
+
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

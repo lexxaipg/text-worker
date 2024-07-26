@@ -1,52 +1,38 @@
-#FROM python:3.11-slim
-FROM nvidia/cuda:12.1.1-devel-ubuntu22.04 AS base
+# Dotnet Installer image
+FROM amd64/buildpack-deps:jammy-curl AS installer
 
-# Aphrodite
+# Retrieve ASP.NET Core
+RUN aspnetcore_version=8.0.7 \
+    && curl -fSL --output aspnetcore.tar.gz https://dotnetcli.azureedge.net/dotnet/aspnetcore/Runtime/$aspnetcore_version/aspnetcore-runtime-$aspnetcore_version-linux-x64.tar.gz \
+    && aspnetcore_sha512='c7479dc008fce77c2bfcaa1ac1c9fe6f64ef7e59609fff6707da14975aade73e3cb22b97f2b3922a2642fa8d843a3caf714ab3a2b357abeda486b9d0f8bebb18' \
+    && echo "$aspnetcore_sha512  aspnetcore.tar.gz" | sha512sum -c - \
+    && tar -oxzf aspnetcore.tar.gz ./shared/Microsoft.AspNetCore.App \
+    && rm aspnetcore.tar.gz
 
-ENV HOME=/app/aphrodite-engine
+RUN dotnet_version=8.0.7 \
+    && curl -fSL --output dotnet.tar.gz https://dotnetcli.azureedge.net/dotnet/Runtime/$dotnet_version/dotnet-runtime-$dotnet_version-linux-x64.tar.gz \
+    && dotnet_sha512='88e9ac34ad5ac76eec5499f2eb8d1aa35076518c842854ec1053953d34969c7bf1c5b2dbce245dbace3a18c3b8a4c79d2ef2d2ff105ce9d17cbbdbe813d8b16f' \
+    && echo "$dotnet_sha512  dotnet.tar.gz" | sha512sum -c - \
+    && mkdir -p /dotnet \
+    && tar -oxzf dotnet.tar.gz -C /dotnet \
+    && rm dotnet.tar.gz
 
-WORKDIR $HOME
+# Aphroride image
+FROM alpindale/aphrodite-engine AS base
 
-# Upgrade OS Packages + Prepare Python Environment
-RUN set -eux; \
-    export DEBIAN_FRONTEND=noninteractive \
-    && apt-get update -y \
-    && apt-get install -y bzip2 g++ git make python3-pip tzdata \
-    && rm -fr /var/lib/apt/lists/*
+# ASP.NET Core version
+ENV ASPNET_VERSION=8.0.7
 
-# Alias python3 to python
-RUN ln -s /usr/bin/python3 /usr/bin/python
+USER root
+COPY --from=installer ["/dotnet", "/usr/share/dotnet"]
+COPY --from=installer ["/shared/Microsoft.AspNetCore.App", "/usr/share/dotnet/shared/Microsoft.AspNetCore.App"]
 
-RUN python3 -m pip install --no-cache-dir --upgrade pip
-
-RUN git clone https://github.com/PygmalionAI/aphrodite-engine.git /tmp/aphrodite-engine \
-    && mv /tmp/aphrodite-engine/* . \
-    && rm -fr /tmp/aphrodite-engine \
-    && chmod +x docker/entrypoint.sh
-
-# Export the CUDA_HOME variable correctly
-ENV CUDA_HOME=/usr/local/cuda
-
-ENV HF_HOME=/tmp
-ENV NUMBA_CACHE_DIR=$HF_HOME/numba_cache
-ENV TORCH_CUDA_ARCH_LIST="6.1 7.0 7.5 8.0 8.6 8.9 9.0+PTX"
-RUN python3 -m pip install --no-cache-dir -e .
-
-# Entrypoint exec form doesn't do variable substitution automatically ($HOME)
-#ENTRYPOINT ["/app/aphrodite-engine/docker/entrypoint.sh"]
-
-EXPOSE 7860
-
-#USER 1000:0
-
-VOLUME ["/tmp"]
-
-# Worker
+RUN ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
 
 RUN apt-get -y update
-RUN apt-get -y install python3
-RUN apt-get -y install pip
-RUN apt-get -y install python-is-python3
+RUN apt-get -y install libicu-dev
+
+# Worker
 
 WORKDIR /worker
 
@@ -59,16 +45,6 @@ COPY .. .
 EXPOSE 443
 
 #CMD ["python", "-s", "bridge_scribe.py"]
-
-# Dotnet
-RUN aspnetcore_version=8.0.7 \
-    && curl -fSL --output aspnetcore.tar.gz https://dotnetcli.azureedge.net/dotnet/aspnetcore/Runtime/$aspnetcore_version/aspnetcore-runtime-$aspnetcore_version-linux-x64.tar.gz \
-    && aspnetcore_sha512='c7479dc008fce77c2bfcaa1ac1c9fe6f64ef7e59609fff6707da14975aade73e3cb22b97f2b3922a2642fa8d843a3caf714ab3a2b357abeda486b9d0f8bebb18' \
-    && echo "$aspnetcore_sha512  aspnetcore.tar.gz" | sha512sum -c - \
-    && tar -oxzf aspnetcore.tar.gz ./shared/Microsoft.AspNetCore.App \
-    && rm aspnetcore.tar.gz
-	
-ENV ASPNET_VERSION=8.0.7
 
 #USER $APP_UID
 WORKDIR /app
@@ -92,3 +68,4 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "AipgOmniworker.dll"]
+#ENTRYPOINT ["tail", "-f", "/dev/null"]
